@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Zypp Electric - Automatic Lead Management Dashboard</title>
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <!-- Chart.js -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="app-container">
+    
+    <!-- Top Header Bar -->
+    <header class="app-header">
+      <div class="header-logo-container">
+        <div class="logo-circle">
+          <span class="logo-bolt">⚡</span>
+        </div>
+        <div class="header-titles">
+          <h1>ZYPP <span class="accent-green">ELECTRIC</span></h1>
+          <p class="subtitle">Automatic Lead Management Dashboard</p>
+        </div>
+      </div>
+      
+      <!-- Live Status & Actions -->
+      <div class="header-actions">
+        <div class="live-badge-container">
+          <span class="live-pulse"></span>
+          <span class="live-text">Live Auto-Update</span>
+        </div>
+        <div class="countdown-container" title="Time until next auto-refresh">
+          <svg class="countdown-svg" width="36" height="36">
+            <circle class="countdown-bg" cx="18" cy="18" r="15"></circle>
+            <circle class="countdown-bar" cx="18" cy="18" r="15" style="stroke-dasharray: 94; stroke-dashoffset: 0;"></circle>
+          </svg>
+          <span id="countdown-text">5:00</span>
+        </div>
+        <div class="update-timestamp">
+          <span class="label">Last Updated:</span>
+          <span id="last-updated-time">--:--:--</span>
+        </div>
+        <button id="btn-refresh" class="btn btn-primary" title="Force Refresh Sheets">
+          <i data-lucide="refresh-cw"></i>
+          <span>Refresh</span>
+        </button>
+        <button id="btn-settings" class="btn btn-secondary" title="Configure Sheet IDs">
+          <i data-lucide="settings"></i>
+          <span>Configure</span>
+        </button>
+        <div class="demo-toggle-container">
+          <span class="demo-label">Demo Data (For Unconfigured Sheets)</span>
+          <label class="switch">
+            <input type="checkbox" id="toggle-demo" checked>
+            <span class="slider round"></span>
+          </label>
+        </div>
+      </div>
+    </header>
+
+    <!-- Settings Warning Notification when sheets are missing -->
+    <div id="settings-warning" class="banner-warning hidden">
+      <i data-lucide="alert-circle"></i>
+      <span>Some Google Sheet IDs are not configured. Click the <strong>Configure</strong> button at the top to add them. Demo Mode is currently displaying mock data for those sources.</span>
+    </div>
+
+    <!-- Main Dashboard Body -->
+    <main class="dashboard-content">
+      
+      <!-- Section 1: Main Aggregations Table -->
+      <section class="dashboard-section table-section">
+        <div class="section-header">
+          <div class="section-title-wrapper">
+            <i data-lucide="calendar-range" class="title-icon"></i>
+            <h2>Time Period Performance</h2>
+          </div>
+          <span class="helper-badge">Click cells to drill down</span>
+        </div>
+        
+        <div class="table-responsive">
+          <table class="dashboard-table" id="time-perf-table">
+            <thead>
+              <tr>
+                <th class="col-source">Lead Source</th>
+                <th class="col-val text-center">Today</th>
+                <th class="col-val text-center">Y-1 (Yesterday)</th>
+                <th class="col-val text-center">Y-2 (2 Days Ago)</th>
+                <th class="col-val text-center">Y-3 (3 Days Ago)</th>
+                <th class="col-val text-center">Y-4 (4 Days Ago)</th>
+                <th class="col-val text-center">MTD</th>
+                <th class="col-val text-center">Last Month</th>
+              </tr>
+            </thead>
+            <tbody id="time-perf-body">
+              <!-- Dynamically populated -->
+            </tbody>
+            <tfoot>
+              <!-- Totals row -->
+              <tr class="totals-row" id="time-perf-totals">
+                <!-- Dynamically populated -->
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      </section>
+
+      <!-- Section 2: Lead Status Distribution & Chart side by side -->
+      <div class="dashboard-grid">
+        
+        <!-- Left: Status Table -->
+        <section class="dashboard-section status-section">
+          <div class="section-header">
+            <div class="section-title-wrapper">
+              <i data-lucide="pie-chart" class="title-icon"></i>
+              <h2>Status Breakdown</h2>
+            </div>
+            <span class="helper-badge">Case-insensitive Matching</span>
+          </div>
+          
+          <div class="table-responsive">
+            <table class="dashboard-table" id="status-table">
+              <thead>
+                <tr>
+                  <th class="col-source">Lead Source</th>
+                  <th class="col-val text-center">Total</th>
+                  <th class="col-val text-center">Interested</th>
+                  <th class="col-val text-center">Warm</th>
+                  <th class="col-val text-center">Cold</th>
+                  <th class="col-val text-center">Not Interested</th>
+                  <th class="col-val text-center">Converted</th>
+                  <th class="col-val text-center">Paid</th>
+                </tr>
+              </thead>
+              <tbody id="status-body">
+                <!-- Dynamically populated -->
+              </tbody>
+              <tfoot>
+                <!-- Totals row -->
+                <tr class="totals-row" id="status-totals">
+                  <!-- Dynamically populated -->
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        </section>
+
+        <!-- Right: 14-Day Trend Chart -->
+        <section class="dashboard-section chart-section">
+          <div class="section-header">
+            <div class="section-title-wrapper">
+              <i data-lucide="trending-up" class="title-icon"></i>
+              <h2>14-Day Daily Ingestion Trend</h2>
+            </div>
+            <div class="chart-controls">
+              <select id="chart-source-selector" class="select-input">
+                <option value="all">Combined (All Sources)</option>
+                <option value="delivery">Delivery Services</option>
+                <option value="fleetease">Fleetease.ai</option>
+                <option value="franchise">Franchise</option>
+                <option value="ads">Ads</option>
+                <option value="riders">Riders</option>
+              </select>
+            </div>
+          </div>
+          <div class="chart-container-wrapper">
+            <canvas id="trendChart"></canvas>
+          </div>
+        </section>
+        
+      </div>
+      
+    </main>
+
+    <!-- Configure Sheet IDs Modal -->
+    <div id="settings-modal" class="modal-backdrop hidden">
+      <div class="modal-container settings-modal-width">
+        <div class="modal-header">
+          <h3>
+            <i data-lucide="settings" class="modal-title-icon"></i>
+            Configure Google Sheet IDs
+          </h3>
+          <button class="btn-close-modal" id="btn-close-settings">&times;</button>
+        </div>
+        <div class="modal-body">
+          <p class="settings-desc">
+            Enter the Google Sheet IDs for each source. Make sure the sheets are set to <strong>"Anyone with the link can view"</strong>.
+          </p>
+          <div class="settings-form">
+            <div class="form-group">
+              <label for="input-delivery">1. Delivery Services</label>
+              <input type="text" id="input-delivery" placeholder="Enter Sheet ID (e.g. 1WQTGGj2...)">
+            </div>
+            <div class="form-group">
+              <label for="input-fleetease">2. Fleetease.ai</label>
+              <input type="text" id="input-fleetease" placeholder="Enter Sheet ID">
+            </div>
+            <div class="form-group">
+              <label for="input-franchise">3. Franchise</label>
+              <input type="text" id="input-franchise" placeholder="Enter Sheet ID">
+            </div>
+            <div class="form-group">
+              <label for="input-ads">4. Ads</label>
+              <input type="text" id="input-ads" placeholder="Enter Sheet ID">
+            </div>
+            <div class="form-group">
+              <label for="input-riders">5. Riders</label>
+              <input type="text" id="input-riders" placeholder="Enter Sheet ID">
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button id="btn-reset-default" class="btn btn-secondary text-danger">Reset Franchise Default</button>
+          <div style="flex: 1;"></div>
+          <button id="btn-cancel-settings" class="btn btn-secondary">Cancel</button>
+          <button id="btn-save-settings" class="btn btn-primary">Save Settings</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Drill-down Leads Modal -->
+    <div id="drilldown-modal" class="modal-backdrop hidden">
+      <div class="modal-container drilldown-modal-width">
+        <div class="modal-header">
+          <div class="modal-title-left">
+            <h3 id="drilldown-title">Lead Details</h3>
+            <span id="drilldown-subtitle" class="badge-drilldown">Franchise - Today</span>
+          </div>
+          <button class="btn-close-modal" id="btn-close-drilldown">&times;</button>
+        </div>
+        <div class="modal-body-wrapper">
+          <div class="drilldown-controls">
+            <div class="search-box">
+              <i data-lucide="search" class="search-icon"></i>
+              <input type="text" id="drilldown-search" placeholder="Search by name, email, city, status...">
+            </div>
+            <div class="export-actions">
+              <span id="drilldown-count" class="count-badge">Found 0 leads</span>
+              <button id="btn-export-csv" class="btn btn-secondary">
+                <i data-lucide="download"></i>
+                <span>Export CSV</span>
+              </button>
+            </div>
+          </div>
+          <div class="table-responsive modal-table-scroll">
+            <table class="dashboard-table drilldown-table" id="details-table">
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>Name</th>
+                  <th>Email</th>
+                  <th>Mobile</th>
+                  <th>Date</th>
+                  <th>Status</th>
+                  <th>Call Interest</th>
+                  <th>Lead POC</th>
+                </tr>
+              </thead>
+              <tbody id="details-body">
+                <!-- Dynamically populated -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
