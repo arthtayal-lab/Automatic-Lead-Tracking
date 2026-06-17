@@ -6,6 +6,7 @@
 const CONFIG = {
   REFRESH_INTERVAL_SEC: 300, // 5 minutes
   DEFAULT_FRANCHISE_ID: '1WQTGGj2A6qIWC9UVGqOd_mhksbtCM_oD_WSZwpy9_9k',
+  DEFAULT_ADS_ID: '1cvFVTlWSce5whci4Au3MeqRRFVRb8baIiev6WZ7tE0o',
   SOURCES: [
     { key: 'delivery', name: 'Delivery Services', fallbackColor: '#00d2ff' },
     { key: 'fleetease', name: 'Fleetease.ai', fallbackColor: '#a855f7' },
@@ -20,7 +21,7 @@ let state = {
     delivery: '',
     fleetease: '',
     franchise: CONFIG.DEFAULT_FRANCHISE_ID,
-    ads: '',
+    ads: CONFIG.DEFAULT_ADS_ID,
     riders: ''
   },
   demoMode: true,
@@ -114,6 +115,30 @@ function updateWarningBanner() {
   } else {
     warningBanner.classList.add('hidden');
   }
+}
+
+// --- Date Parsing ---
+function parseDate(dateVal) {
+  if (!dateVal) return null;
+  if (typeof dateVal === 'string') {
+    // Handle 'Date(2024,0,15)' format from gviz
+    if (dateVal.startsWith('Date(')) {
+      const parts = dateVal.replace('Date(', '').replace(')', '').split(',');
+      return new Date(parts[0], parts[1], parts[2]);
+    }
+    // Handle 'yyyy-mm-dd hh:mm:ss' or 'yyyy-mm-dd'
+    const ymdMatch = dateVal.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (ymdMatch) {
+      return new Date(ymdMatch[1], parseInt(ymdMatch[2]) - 1, ymdMatch[3]);
+    }
+    // Handle 'dd/mm/yyyy'
+    const dmyMatch = dateVal.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+    if (dmyMatch) {
+      return new Date(dmyMatch[3], parseInt(dmyMatch[2]) - 1, dmyMatch[1]);
+    }
+  }
+  // Fallback
+  return new Date(dateVal);
 }
 
 // --- Date Calculation Helpers ---
@@ -223,7 +248,7 @@ function generateMockLeads(sourceKey, sourceName) {
 }
 
 // --- Fetching Sheet Data via JSONP (Bypasses CORS entirely) ---
-function fetchSheetDataJSONP(sheetId) {
+function fetchSheetDataJSONP(sheetId, sourceKey) {
   return new Promise((resolve, reject) => {
     if (!sheetId) {
       resolve([]);
@@ -235,7 +260,11 @@ function fetchSheetDataJSONP(sheetId) {
     
     // Create script element
     const script = document.createElement('script');
-    script.src = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:json;responseHandler:${callbackName}&headers=1`;
+    let url = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:json;responseHandler:${callbackName}&headers=1`;
+    if (sourceKey === 'ads') {
+      url += '&gid=2044633763';
+    }
+    script.src = url;
     script.id = callbackName;
     
     // Add cleanup and timeout
@@ -255,7 +284,7 @@ function fetchSheetDataJSONP(sheetId) {
     window[callbackName] = function(data) {
       cleanup();
       try {
-        const parsedLeads = parseGvizTable(data);
+        const parsedLeads = parseGvizTable(data, sourceKey);
         resolve(parsedLeads);
       } catch (err) {
         reject(err);
@@ -274,7 +303,7 @@ function fetchSheetDataJSONP(sheetId) {
 }
 
 // --- Parse Google Sheets gviz JSON Structure ---
-function parseGvizTable(data) {
+function parseGvizTable(data, sourceKey) {
   const table = data.table;
   if (!table || !table.cols || !table.rows) {
     throw new Error('Invalid sheet structure. Ensure columns are not empty.');
@@ -298,25 +327,37 @@ function parseGvizTable(data) {
   cols.forEach((col, idx) => {
     const label = (col.label || '').trim().toLowerCase();
     
-    if (label === 'name' || label === 'lead name') colIndices.name = idx;
+    if (label === 'name' || label === 'lead name' || label === 'full name') colIndices.name = idx;
     else if (label === 'email' || label === 'email id') colIndices.email = idx;
-    else if (label === 'mobile' || label === 'mobile number' || label === 'phone' || label === 'contact') colIndices.mobile = idx;
-    else if (label === 'date' || (label.includes('date') && !label.includes('calling') && !label.includes('followup') && !label.includes('follow up') && !label.includes('agreement'))) colIndices.date = idx;
+    else if (label === 'mobile' || label === 'mobile number' || label === 'phone' || label === 'contact' || label === 'mobile no') colIndices.mobile = idx;
+    else if (label === 'date' || label === 'created date' || label === 'timestamp' || label === 'created at' || (label.includes('date') && !label.includes('calling') && !label.includes('followup') && !label.includes('follow up') && !label.includes('agreement') && !label.includes('expected'))) colIndices.date = idx;
     else if (label === 'lead status' || label === 'lead status ' || label === 'status') colIndices.leadStatus = idx;
-    else if (label === 'call intrest' || label === 'call interest' || label === 'interest') colIndices.callInterest = idx;
-    else if (label === 'lead poc' || label === 'poc') colIndices.poc = idx;
+    else if (label === 'call intrest' || label === 'call interest' || label === 'interest' || label === 'call status') colIndices.callInterest = idx;
+    else if (label === 'lead poc' || label === 'poc' || label === 'owner of lead') colIndices.poc = idx;
     else if (label === 'city') colIndices.city = idx;
   });
   
-  // Fallbacks based on the reference layout (Franchise Sheet structure)
-  if (colIndices.name === -1) colIndices.name = 0;
-  if (colIndices.email === -1) colIndices.email = 1;
-  if (colIndices.mobile === -1) colIndices.mobile = 2;
-  if (colIndices.city === -1) colIndices.city = 4;
-  if (colIndices.date === -1) colIndices.date = 5;
-  if (colIndices.poc === -1) colIndices.poc = 7;
-  if (colIndices.callInterest === -1) colIndices.callInterest = 11;
-  if (colIndices.leadStatus === -1) colIndices.leadStatus = 16;
+  // Hard Fallbacks for automated sheets that lack proper headers
+  if (sourceKey === 'ads') {
+    if (colIndices.name === -1) colIndices.name = 2;
+    if (colIndices.email === -1) colIndices.email = 3;
+    if (colIndices.mobile === -1) colIndices.mobile = 4;
+    if (colIndices.city === -1) colIndices.city = 5;
+    if (colIndices.date === -1) colIndices.date = 1;
+    if (colIndices.poc === -1) colIndices.poc = 12;
+    if (colIndices.callInterest === -1) colIndices.callInterest = 14;
+    if (colIndices.leadStatus === -1) colIndices.leadStatus = 18;
+  } else {
+    // Fallbacks based on the reference layout (Franchise Sheet structure)
+    if (colIndices.name === -1) colIndices.name = 0;
+    if (colIndices.email === -1) colIndices.email = 1;
+    if (colIndices.mobile === -1) colIndices.mobile = 2;
+    if (colIndices.city === -1) colIndices.city = 4;
+    if (colIndices.date === -1) colIndices.date = 5;
+    if (colIndices.poc === -1) colIndices.poc = 7;
+    if (colIndices.callInterest === -1) colIndices.callInterest = 11;
+    if (colIndices.leadStatus === -1) colIndices.leadStatus = 16;
+  }
   
   const leads = [];
   rows.forEach(row => {
@@ -352,6 +393,7 @@ function parseGvizTable(data) {
     if (dateStr) {
       const ymdMatch = dateStr.match(/^(\d{4}-\d{2}-\d{2})/);
       const gvizDateMatch = dateStr.match(/Date\((\d+),\s*(\d+),\s*(\d+)/);
+      const dmyMatch = dateStr.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
       
       if (ymdMatch) {
         ymd = ymdMatch[1];
@@ -359,6 +401,11 @@ function parseGvizTable(data) {
         const y = gvizDateMatch[1];
         const m = String(Number(gvizDateMatch[2]) + 1).padStart(2, '0');
         const d = String(gvizDateMatch[3]).padStart(2, '0');
+        ymd = `${y}-${m}-${d}`;
+      } else if (dmyMatch) {
+        const d = String(dmyMatch[1]).padStart(2, '0');
+        const m = String(dmyMatch[2]).padStart(2, '0');
+        const y = dmyMatch[3];
         ymd = `${y}-${m}-${d}`;
       } else {
         try {
@@ -400,11 +447,11 @@ function aggregateSourceData(leads) {
     total: leads.length,
     
     interested: 0,
-    warm: 0,
-    cold: 0,
+    callAgain: 0,
+    followup: 0,
     notInterested: 0,
-    converted: 0,
-    paid: 0
+    wrongNo: 0,
+    blank: 0
   };
   
   leads.forEach(lead => {
@@ -422,21 +469,19 @@ function aggregateSourceData(leads) {
     const statusVal = (lead.status || '').toLowerCase();
     const interestVal = (lead.callInterest || '').toLowerCase();
     
-    const isInterested = statusVal.includes('intrested') || statusVal.includes('interested') || statusVal.includes('warm') || statusVal.includes('hot') ||
-                         interestVal.includes('intrested') || interestVal.includes('interested') || interestVal.includes('warm') || interestVal.includes('hot');
-    
-    const isWarm = statusVal.includes('warm') || interestVal.includes('warm');
-    const isCold = statusVal.includes('cold') || interestVal.includes('cold');
+    const isCallAgain = statusVal.includes('call again') || interestVal.includes('call again');
+    const isFollowup = statusVal.includes('followup') || statusVal.includes('follow up') || interestVal.includes('followup') || interestVal.includes('follow up');
     const isNotInterested = statusVal.includes('not interest') || statusVal.includes('not intrest') || interestVal.includes('not interest') || interestVal.includes('not intrest') || statusVal.includes('no interest') || interestVal.includes('no interest');
-    const isConverted = statusVal.includes('converted') || interestVal.includes('converted');
-    const isPaid = statusVal.includes('paid') || interestVal.includes('paid');
+    const isInterested = (statusVal.includes('interested') || statusVal.includes('intrested') || interestVal.includes('interested') || interestVal.includes('intrested')) && !isNotInterested;
+    const isWrongNo = statusVal.includes('wrong no') || statusVal.includes('wrong number') || interestVal.includes('wrong no') || interestVal.includes('wrong number');
+    const isBlank = statusVal === '' && interestVal === '';
     
+    if (isCallAgain) summary.callAgain++;
+    if (isFollowup) summary.followup++;
     if (isInterested) summary.interested++;
-    if (isWarm) summary.warm++;
-    if (isCold) summary.cold++;
     if (isNotInterested) summary.notInterested++;
-    if (isConverted) summary.converted++;
-    if (isPaid) summary.paid++;
+    if (isWrongNo) summary.wrongNo++;
+    if (isBlank) summary.blank++;
   });
   
   return summary;
@@ -454,8 +499,9 @@ async function fetchAndRenderAll() {
     state.errors[source.key] = null; // Clear previous error
     
     try {
+      const sheetId = state.sheetIds[source.key];
       if (sheetId) {
-        state.allLeads[source.key] = await fetchSheetDataJSONP(sheetId);
+        state.allLeads[source.key] = await fetchSheetDataJSONP(sheetId, source.key);
       } else if (state.demoMode) {
         state.allLeads[source.key] = generateMockLeads(source.key, source.name);
       } else {
@@ -492,7 +538,7 @@ function renderTimePeriodTable() {
   tbody.innerHTML = '';
   
   const totals = {
-    today: 0, y1: 0, y2: 0, y3: 0, y4: 0, mtd: 0, lastMonth: 0
+    today: 0, y1: 0, y2: 0, y3: 0, y4: 0, mtd: 0, lastMonth: 0, total: 0
   };
   
   CONFIG.SOURCES.forEach(source => {
@@ -509,6 +555,14 @@ function renderTimePeriodTable() {
     totals.y4 += summary.y4;
     totals.mtd += summary.mtd;
     totals.lastMonth += summary.lastMonth;
+    totals.total += summary.total;
+    
+    totals.callAgain = (totals.callAgain || 0) + summary.callAgain;
+    totals.followup = (totals.followup || 0) + summary.followup;
+    totals.interested = (totals.interested || 0) + summary.interested;
+    totals.notInterested = (totals.notInterested || 0) + summary.notInterested;
+    totals.wrongNo = (totals.wrongNo || 0) + summary.wrongNo;
+    totals.blank = (totals.blank || 0) + summary.blank;
     
     const tr = document.createElement('tr');
     
@@ -571,6 +625,7 @@ function renderTimePeriodTable() {
       ${getCellHTML(summary.y4, 'y4')}
       ${getCellHTML(summary.mtd, 'mtd')}
       ${getCellHTML(summary.lastMonth, 'lastMonth')}
+      ${getCellHTML(summary.total, 'total')}
     `;
     
     tbody.appendChild(tr);
@@ -608,16 +663,44 @@ function renderTimePeriodTable() {
     ${getTotalCellHTML(totals.y4, 'y4')}
     ${getTotalCellHTML(totals.mtd, 'mtd')}
     ${getTotalCellHTML(totals.lastMonth, 'lastMonth')}
+    ${getTotalCellHTML(totals.total, 'total')}
   `;
 }
 
 // --- Render Table 2: Status Breakdown ---
 function renderStatusBreakdownTable() {
-  const tbody = document.getElementById('status-body');
-  tbody.innerHTML = '';
+  const container = document.getElementById('status-tables-container');
+  if (!container) return;
+  container.innerHTML = '';
   
-  const totals = {
-    total: 0, interested: 0, warm: 0, cold: 0, notInterested: 0, converted: 0, paid: 0
+  const statusConfigs = {
+    franchise: [
+      { key: 'interested', label: 'Interested' },
+      { key: 'warm', label: 'Warm' },
+      { key: 'cold', label: 'Cold' },
+      { key: 'notInterested', label: 'Not Interested' },
+      { key: 'converted', label: 'Converted' },
+      { key: 'paid', label: 'Paid' },
+      { key: 'total', label: 'Total' }
+    ],
+    ads: [
+      { key: 'callAgain', label: 'Call Again' },
+      { key: 'followup', label: 'Follow-up' },
+      { key: 'interested', label: 'Interested' },
+      { key: 'notInterested', label: 'Not Interested' },
+      { key: 'wrongNo', label: 'Wrong Number' },
+      { key: 'blank', label: 'Blank' },
+      { key: 'total', label: 'Total' }
+    ],
+    default: [
+      { key: 'interested', label: 'Interested' },
+      { key: 'warm', label: 'Warm' },
+      { key: 'cold', label: 'Cold' },
+      { key: 'notInterested', label: 'Not Interested' },
+      { key: 'converted', label: 'Converted' },
+      { key: 'paid', label: 'Paid' },
+      { key: 'total', label: 'Total' }
+    ]
   };
   
   CONFIG.SOURCES.forEach(source => {
@@ -627,14 +710,24 @@ function renderStatusBreakdownTable() {
     const hasError = !!state.errors[source.key];
     const summary = aggregateSourceData(leads);
     
-    totals.total += summary.total;
-    totals.interested += summary.interested;
-    totals.warm += summary.warm;
-    totals.cold += summary.cold;
-    totals.notInterested += summary.notInterested;
-    totals.converted += summary.converted;
-    totals.paid += summary.paid;
+    const config = statusConfigs[source.key] || statusConfigs.default;
     
+    const wrapper = document.createElement('div');
+    wrapper.className = 'table-responsive mb-4';
+    
+    const table = document.createElement('table');
+    table.className = 'dashboard-table';
+    
+    const thead = document.createElement('thead');
+    let thHtml = `<tr><th class="col-source">${source.name}</th>`;
+    config.forEach(c => {
+      thHtml += `<th class="col-val text-center">${c.label}</th>`;
+    });
+    thHtml += `</tr>`;
+    thead.innerHTML = thHtml;
+    table.appendChild(thead);
+    
+    const tbody = document.createElement('tbody');
     const tr = document.createElement('tr');
     
     let sourceStatusClass = 'inactive';
@@ -648,69 +741,63 @@ function renderStatusBreakdownTable() {
       errorBadge = ` <span class="helper-badge text-warning" style="font-size:0.6rem;">Demo</span>`;
     }
     
-    const getCellHTML = (val, cellType) => {
-      const isClickable = !hasError && val > 0;
-      return `<td class="text-center val-cell ${isClickable ? 'clickable' : 'val-zero'}" 
-                  data-source="${source.key}" 
-                  data-type="${cellType}" 
-                  data-val="${val}">
-                ${hasError ? '—' : val}
-              </td>`;
-    };
-    
-    tr.innerHTML = `
+    let tdHtml = `
       <td class="col-source">
         <span class="source-status ${sourceStatusClass}"></span>
-        ${source.name}${errorBadge}
+        Status
       </td>
-      ${getCellHTML(summary.total, 'total')}
-      ${getCellHTML(summary.interested, 'interested')}
-      ${getCellHTML(summary.warm, 'warm')}
-      ${getCellHTML(summary.cold, 'cold')}
-      ${getCellHTML(summary.notInterested, 'notInterested')}
-      ${getCellHTML(summary.converted, 'converted')}
-      ${getCellHTML(summary.paid, 'paid')}
     `;
     
+    config.forEach(c => {
+      const val = summary[c.key] || 0;
+      const isClickable = !hasError && val > 0;
+      tdHtml += `
+        <td class="text-center val-cell ${isClickable ? 'clickable' : 'val-zero'}" 
+            data-source="${source.key}" 
+            data-type="${c.key}" 
+            data-val="${val}">
+          ${hasError ? '—' : val}
+        </td>`;
+    });
+    
+    tr.innerHTML = tdHtml;
     tbody.appendChild(tr);
+    table.appendChild(tbody);
+    wrapper.appendChild(table);
+    container.appendChild(wrapper);
   });
-  
-  const totalsRow = document.getElementById('status-totals');
-  
-  const getTotalCellHTML = (val, cellType) => {
-    return `<td class="text-center val-cell ${val > 0 ? 'clickable' : 'val-zero'}" 
-                data-source="all" 
-                data-type="${cellType}" 
-                data-val="${val}">
-              ${val}
-            </td>`;
-  };
-  
-  totalsRow.innerHTML = `
-    <td class="col-source">Grand Total</td>
-    ${getTotalCellHTML(totals.total, 'total')}
-    ${getTotalCellHTML(totals.interested, 'interested')}
-    ${getTotalCellHTML(totals.warm, 'warm')}
-    ${getTotalCellHTML(totals.cold, 'cold')}
-    ${getTotalCellHTML(totals.notInterested, 'notInterested')}
-    ${getTotalCellHTML(totals.converted, 'converted')}
-    ${getTotalCellHTML(totals.paid, 'paid')}
-  `;
 }
 
-// --- Render Chart: 14-Day Lead Trend ---
+// --- Render Chart: Month-on-Month Ingestion Trend ---
 function renderChart() {
   const ctx = document.getElementById('trendChart').getContext('2d');
   
   const labels = [];
-  const ymdList = [];
-  for (let i = 13; i >= 0; i--) {
-    const ymd = getRelativeDateString(i);
-    ymdList.push(ymd);
+  const monthKeys = []; // Array of 'YYYY-MM' strings
+  
+  const today = new Date();
+  const currentYear = today.getFullYear();
+  const currentMonth = today.getMonth(); // 0-indexed
+  
+  // Starting from January 2026
+  const startYear = 2026;
+  const startMonth = 0; // January
+  
+  let tempYear = startYear;
+  let tempMonth = startMonth;
+  
+  const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  
+  while (tempYear < currentYear || (tempYear === currentYear && tempMonth <= currentMonth)) {
+    const monthKey = `${tempYear}-${String(tempMonth + 1).padStart(2, '0')}`;
+    monthKeys.push(monthKey);
+    labels.push(`${monthNames[tempMonth]} ${tempYear}`);
     
-    const d = new Date();
-    d.setDate(d.getDate() - i);
-    labels.push(d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }));
+    tempMonth++;
+    if (tempMonth > 11) {
+      tempMonth = 0;
+      tempYear++;
+    }
   }
   
   const filterVal = document.getElementById('chart-source-selector').value;
@@ -721,9 +808,9 @@ function renderChart() {
       const leads = state.allLeads[source.key];
       const hasError = !!state.errors[source.key];
       
-      const data = ymdList.map(ymd => {
+      const data = monthKeys.map(ymdPrefix => {
         if (hasError) return 0;
-        return leads.filter(l => l.ymd === ymd).length;
+        return leads.filter(l => l.ymd && l.ymd.startsWith(ymdPrefix)).length;
       });
       
       return {
@@ -740,9 +827,9 @@ function renderChart() {
     const leads = state.allLeads[filterVal];
     const hasError = !!state.errors[filterVal];
     
-    const data = ymdList.map(ymd => {
+    const data = monthKeys.map(ymdPrefix => {
       if (hasError) return 0;
-      return leads.filter(l => l.ymd === ymd).length;
+      return leads.filter(l => l.ymd && l.ymd.startsWith(ymdPrefix)).length;
     });
     
     datasets = [{
@@ -871,7 +958,7 @@ function openDrilldown(sourceKey, cellType) {
       break;
     case 'mtd':
       filteredLeads = leadsToFilter.filter(l => l.ymd >= ranges.mtdStart && l.ymd <= ranges.mtdEnd);
-      filterName = 'Month to Date (MTD)';
+      filterName = 'This Month (MTD)';
       break;
     case 'lastMonth':
       filteredLeads = leadsToFilter.filter(l => l.ymd >= ranges.lastMonthStart && l.ymd <= ranges.lastMonthEnd);
@@ -881,22 +968,26 @@ function openDrilldown(sourceKey, cellType) {
       filteredLeads = leadsToFilter;
       filterName = 'Total Leads';
       break;
+    case 'callAgain':
+      filteredLeads = leadsToFilter.filter(l => (l.status || '').toLowerCase().includes('call again') || (l.callInterest || '').toLowerCase().includes('call again'));
+      filterName = 'Call Again';
+      break;
+    case 'followup':
+      filteredLeads = leadsToFilter.filter(l => {
+        const s = (l.status || '').toLowerCase();
+        const i = (l.callInterest || '').toLowerCase();
+        return s.includes('followup') || s.includes('follow up') || i.includes('followup') || i.includes('follow up');
+      });
+      filterName = 'Followup';
+      break;
     case 'interested':
       filteredLeads = leadsToFilter.filter(l => {
         const s = (l.status || '').toLowerCase();
         const i = (l.callInterest || '').toLowerCase();
-        return s.includes('intrested') || s.includes('interested') || s.includes('warm') || s.includes('hot') ||
-               i.includes('intrested') || i.includes('interested') || i.includes('warm') || i.includes('hot');
+        const isNotInt = s.includes('not interest') || s.includes('not intrest') || i.includes('not interest') || i.includes('not intrest') || s.includes('no interest') || i.includes('no interest');
+        return (s.includes('interested') || s.includes('intrested') || i.includes('interested') || i.includes('intrested')) && !isNotInt;
       });
       filterName = 'Interested';
-      break;
-    case 'warm':
-      filteredLeads = leadsToFilter.filter(l => (l.status || '').toLowerCase().includes('warm') || (l.callInterest || '').toLowerCase().includes('warm'));
-      filterName = 'Warm';
-      break;
-    case 'cold':
-      filteredLeads = leadsToFilter.filter(l => (l.status || '').toLowerCase().includes('cold') || (l.callInterest || '').toLowerCase().includes('cold'));
-      filterName = 'Cold';
       break;
     case 'notInterested':
       filteredLeads = leadsToFilter.filter(l => {
@@ -906,13 +997,21 @@ function openDrilldown(sourceKey, cellType) {
       });
       filterName = 'Not Interested';
       break;
-    case 'converted':
-      filteredLeads = leadsToFilter.filter(l => (l.status || '').toLowerCase().includes('converted') || (l.callInterest || '').toLowerCase().includes('converted'));
-      filterName = 'Converted';
+    case 'wrongNo':
+      filteredLeads = leadsToFilter.filter(l => {
+        const s = (l.status || '').toLowerCase();
+        const i = (l.callInterest || '').toLowerCase();
+        return s.includes('wrong no') || s.includes('wrong number') || i.includes('wrong no') || i.includes('wrong number');
+      });
+      filterName = 'Wrong No';
       break;
-    case 'paid':
-      filteredLeads = leadsToFilter.filter(l => (l.status || '').toLowerCase().includes('paid') || (l.callInterest || '').toLowerCase().includes('paid'));
-      filterName = 'Paid';
+    case 'blank':
+      filteredLeads = leadsToFilter.filter(l => {
+        const s = (l.status || '').toLowerCase();
+        const i = (l.callInterest || '').toLowerCase();
+        return s === '' && i === '';
+      });
+      filterName = 'Blank';
       break;
     default:
       filteredLeads = leadsToFilter;
