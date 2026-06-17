@@ -73,7 +73,13 @@ function loadSettings() {
   const savedIds = localStorage.getItem('zypp_sheet_ids');
   if (savedIds) {
     try {
-      state.sheetIds = { ...state.sheetIds, ...JSON.parse(savedIds) };
+      const parsed = JSON.parse(savedIds);
+      state.sheetIds = {
+        ...state.sheetIds,
+        ...parsed,
+        franchise: parsed.franchise || CONFIG.DEFAULT_FRANCHISE_ID,
+        ads: parsed.ads || CONFIG.DEFAULT_ADS_ID
+      };
     } catch (e) {
       console.error('Error parsing saved sheet IDs from localStorage:', e);
     }
@@ -1153,6 +1159,7 @@ function setupEventListeners() {
   
   document.getElementById('btn-reset-default').addEventListener('click', () => {
     document.getElementById('input-franchise').value = CONFIG.DEFAULT_FRANCHISE_ID;
+    document.getElementById('input-ads').value = CONFIG.DEFAULT_ADS_ID;
   });
   
   document.getElementById('toggle-demo').addEventListener('change', (e) => {
